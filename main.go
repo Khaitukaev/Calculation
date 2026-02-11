@@ -20,6 +20,12 @@ type CalculationRequest struct {
 	Expression string `json:"expression"`
 }
 
+type RequestBody struct {
+	Task string `json:"task"`
+}
+
+var task = "world"
+
 var calculations = []Calcuation{}
 
 func calculateExpression(expression string) (string, error) {
@@ -59,6 +65,26 @@ func postCalculations(c echo.Context) error {
 	return c.JSON(http.StatusCreated, calc)
 }
 
+func postTask(c echo.Context) error {
+	var req RequestBody
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+	}
+
+	if req.Task == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Task field cannot be empty"})
+	}
+
+	task = req.Task
+
+	return c.JSON(http.StatusOK, map[string]string{"message": fmt.Sprintf("Task updated to %v", task)})
+}
+
+func getHello(c echo.Context) error {
+	return c.JSON(http.StatusOK, fmt.Sprintf("hello %v", task))
+}
+
 func main() {
 	e := echo.New()
 
@@ -67,6 +93,9 @@ func main() {
 
 	e.GET("/calculations", getCalculations)
 	e.POST("/calculations", postCalculations)
+
+	e.POST("/task", postTask)
+	e.GET("/", getHello)
 
 	e.Start("localhost:8080")
 }
