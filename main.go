@@ -20,9 +20,26 @@ type CalculationRequest struct {
 	Expression string `json:"expression"`
 }
 
+// Task - структура задачи
+type Task struct {
+	ID     string `json:"id"`
+	Task   string `json:"task"`
+	Status string `json:"status"` // "active", "completed", "archived"
+}
+
+// RequestBody - для POST /task (обратная совместимость)
 type RequestBody struct {
 	Task string `json:"task"`
 }
+
+// UpdateTaskRequest - для PATCH /tasks/:id
+type UpdateTaskRequest struct {
+	Task   *string `json:"task,omitempty"` // указатель для определения наличия поля
+	Status *string `json:"status,omitempty"`
+}
+
+// Хранилище задач (заменяем глобальную переменную task на слайс задач)
+var tasks = []Task{}
 
 var task = "world"
 
@@ -120,6 +137,109 @@ func getHello(c echo.Context) error {
 	return c.JSON(http.StatusOK, fmt.Sprintf("hello %v", task))
 }
 
+// POST /tasks - создать новую задачу
+func createTask(c echo.Context) error {
+	var req RequestBody
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+	}
+
+	if req.Task == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Task field cannot be empty"})
+	}
+
+	newTask := Task{
+		ID:     uuid.New().String(),
+		Task:   req.Task,
+		Status: "active", // статус по умолчанию
+	}
+
+	tasks = append(tasks, newTask)
+
+	// Для обратной совместимости обновляем и старую переменную
+	task = req.Task
+
+	return c.JSON(http.StatusCreated, newTask)
+}
+
+func getTasks(c echo.Context) error {
+	return c.JSON(http.StatusOK, tasks)
+}
+
+// 🔴 **ЗАДАНИЕ 1: PATCH /tasks/:id - обновить задачу**
+func patchTask(c echo.Context) error {
+	id := c.Param("id")
+
+	var req UpdateTaskRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+	}
+
+	// Ищем задачу по ID
+	for i, t := range tasks {
+		if t.ID == id {
+			// Обновляем только те поля, которые переданы
+			if req.Task != nil {
+				tasks[i].Task = *req.Task
+				// Для обратной совместимости обновляем и старую переменную
+				task = *req.Task
+			}
+			if req.Status != nil {
+				// Валидация статуса
+				status := *req.Status
+				if status != "active" && status != "completed" && status != "archived" {
+					return c.JSON(http.StatusBadRequest, map[string]string{
+						"error": "Status must be 'active', 'completed', or 'archived'",
+					})
+				}
+				tasks[i].Status = status
+			}
+
+			return c.JSON(http.StatusOK, tasks[i])
+		}
+	}
+
+	return c.JSON(http.StatusNotFound, map[string]string{"error": "Task not found"})
+}
+
+// 🔴 **ЗАДАНИЕ 2: DELETE /tasks/:id - удалить задачу**
+func deleteTask(c echo.Context) error {
+	id := c.Param("id")
+
+	for i, t := range tasks {
+		if t.ID == id {
+			// Удаляем задачу из слайса
+			tasks = append(tasks[:i], tasks[i+1:]...)
+
+			// Если удалили текущую task, обновляем переменную
+			if t.Task == task {
+				if len(tasks) > 0 {
+					task = tasks[len(tasks)-1].Task // берём последнюю задачу
+				} else {
+					task = "world" // сбрасываем на дефолт
+				}
+			}
+
+			return c.NoContent(http.StatusNoContent)
+		}
+	}
+
+	return c.JSON(http.StatusNotFound, map[string]string{"error": "Task not found"})
+}
+
+// GET /tasks/:id - получить задачу по ID
+func getTaskByID(c echo.Context) error {
+	id := c.Param("id")
+
+	for _, t := range tasks {
+		if t.ID == id {
+			return c.JSON(http.StatusOK, t)
+		}
+	}
+
+	return c.JSON(http.StatusNotFound, map[string]string{"error": "Task not found"})
+}
+
 func main() {
 	e := echo.New()
 
@@ -131,6 +251,14 @@ func main() {
 	e.PATCH("/calculations/:id", patchCalculations)
 	e.DELETE("/calculations/:id", deleteCalculations)
 
+	// 🔴 НОВЫЕ ROUTES для tasks (полноценный CRUD)
+	e.GET("/tasks", getTasks)          // Read all
+	e.POST("/tasks", createTask)       // Create
+	e.GET("/tasks/:id", getTaskByID)   // Read one
+	e.PATCH("/tasks/:id", patchTask)   // Update
+	e.DELETE("/tasks/:id", deleteTask) // Delete
+
+	// Старые routes для обратной совместимости
 	e.POST("/task", postTask)
 	e.GET("/", getHello)
 
